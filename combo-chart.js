@@ -476,10 +476,11 @@
     var rect = el('rect', { x: -pad, y: -pad, width: 0, height: H + pad * 2 }, clip);
     layer.setAttribute('clip-path', 'url(#' + id + ')');
     var start = performance.now(), duration = anim.duration;
-    function frame(now) {
+    function frame() {
+      var now = performance.now();
       self.revealRaf = null;
       if (!rect.isConnected) return; // re-rendered meanwhile
-      var t = Math.min(1, (now - start) / duration);
+      var t = Math.max(0, Math.min(1, (now - start) / duration));
       rect.setAttribute('width', (W + pad * 2) * (1 - Math.pow(1 - t, 3)));
       if (t < 1) self.revealRaf = requestAnimationFrame(frame);
       else layer.removeAttribute('clip-path');
@@ -732,7 +733,8 @@
     var self = this;
     if (this.raf) return;
     var last = performance.now();
-    function step(now) {
+    function step() {
+      var now = performance.now();
       self.raf = null;
       if (!self.ttPos || !self.ttTarget) return;
       var k = 1 - Math.pow(0.8, (now - last) / 16.67);
@@ -771,6 +773,11 @@
   ComboChart.create = function (target, options) { return new ComboChart(target, options); };
   ComboChart.defaults = DEFAULTS;
   ComboChart.typeDefaults = TYPE_DEFAULTS;
+  // Pure helpers, exposed for unit tests. Not part of the public API.
+  ComboChart._internals = {
+    parseTime: parseTime, parsePoint: parsePoint, niceInterval: niceInterval, defaultDateFormat: defaultDateFormat,
+    splinePath: splinePath, segments: segments, tooltipPosition: tooltipPosition, escapeHtml: escapeHtml
+  };
 
   return ComboChart;
 });

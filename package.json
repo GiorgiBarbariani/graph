@@ -10,7 +10,8 @@
     "combo-chart.d.ts"
   ],
   "scripts": {
-    "start": "npx --yes serve -l 8080 ."
+    "start": "npx --yes serve -l 8080 .",
+    "test": "node --test \"test/**/*.test.js\""
   },
   "keywords": [
     "chart",
@@ -20,5 +21,11 @@
     "spline",
     "bar"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "jsdom": "^30.0.1"
+  },
+  "engines": {
+    "node": ">=22"
+  }
 }
