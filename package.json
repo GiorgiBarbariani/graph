@@ -4,8 +4,10 @@
   "description": "Dependency-free time-series combo chart: area + bar + spline + line on one plot",
   "main": "combo-chart.js",
   "browser": "combo-chart.js",
+  "types": "combo-chart.d.ts",
   "files": [
-    "combo-chart.js"
+    "combo-chart.js",
+    "combo-chart.d.ts"
   ],
   "scripts": {
     "start": "npx --yes serve -l 8080 ."

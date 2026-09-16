@@ -17,10 +17,12 @@
     height: null,             // px. null → container height, or 175 if the container has none
     xSpacing: 'category',     // 'category' — equal steps between dates, 'time' — proportional to time
     utc: false,               // parse 'YYYY-MM-DD' strings and format dates in UTC
-    fontFamily: '"Lucida Grande", "Lucida Sans Unicode", Arial, Helvetica, sans-serif',
+    fontFamily: '"Lucida Grande", Verdana, "Lucida Sans Unicode", Arial, Helvetica, sans-serif',
     plotBorderColor: '#cccccc',
     plotBorderWidth: 1,
     cursor: 'pointer',
+    animation: { duration: 1000 }, // initial left-to-right reveal; false to disable
+    ariaLabel: null,          // accessible name; default is generated from series names
     yAxes: {},                // { <yAxis key>: { min, max } } — manual scale overrides
     tooltip: {
       enabled: true,
@@ -39,19 +41,20 @@
   };
 
   var CSS = [
-    '.cc-root{position:relative;width:100%;-webkit-tap-highlight-color:transparent;touch-action:pan-y}',
+    '.cc-root{position:relative;width:100%;-webkit-tap-highlight-color:transparent;touch-action:pan-y;outline:none}',
+    '.cc-root:focus-visible{box-shadow:0 0 0 2px #3770FE}',
     '.cc-svg{position:absolute;left:0;top:0;overflow:visible;display:block}',
     '.cc-graph{fill:none;stroke-linejoin:round;stroke-linecap:round;transition:stroke-width .25s ease}',
     '.cc-bar{transition:filter .15s ease}',
     '.cc-bar.cc-hover{filter:brightness(1.1)}',
     '.cc-tooltip{position:absolute;left:0;top:0;pointer-events:none;z-index:10;white-space:nowrap;',
-    'background:#fff;border-radius:3px;padding:8px;color:#333;font-size:12px;line-height:16px;',
+    'background:#fff;border-radius:3px;padding:8px;color:#333;font-size:13px;line-height:18px;',
     'box-shadow:1px 1px 3px rgba(0,0,0,.28),0 0 1px rgba(0,0,0,.12);opacity:0;visibility:hidden;',
     'transition:opacity .15s ease,visibility 0s linear .15s;will-change:transform}',
     '.cc-tooltip.cc-visible{opacity:1;visibility:visible;transition:opacity .15s ease,visibility 0s}',
-    '.cc-tt-date{font-size:10px;line-height:14px;margin-bottom:1px}',
-    '.cc-tt-row{display:flex;align-items:center;height:17px}',
-    '.cc-tt-dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:4px;flex:none}',
+    '.cc-tt-date{font-size:11px;line-height:15px;margin-bottom:1px}',
+    '.cc-tt-row{display:flex;align-items:center;height:18.5px}',
+    '.cc-tt-dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;flex:none}',
     '.cc-tt-row b{font-weight:bold;margin-left:.3em}'
   ].join('');
 
@@ -262,6 +265,8 @@
     root.style.fontFamily = this.options.fontFamily;
     root.style.cursor = this.options.cursor;
     root.style.height = this.fluidHeight ? '100%' : (this.options.height || 175) + 'px';
+    root.tabIndex = 0;
+    root.setAttribute('role', 'img');
     this.container.appendChild(root);
 
     this.svg = el('svg', { 'class': 'cc-svg', xmlns: SVGNS }, root);
@@ -273,11 +278,33 @@
     this.ttPos = null;
     this.ttTarget = null;
 
-    this._onMove = function (e) { self._pointerMove(e); };
-    this._onLeave = function () { self._pointerLeave(); };
+    // Pointer moves are coalesced to one hover update per animation frame.
+    this._onMove = function (e) {
+      self.lastPointer = { x: e.clientX, y: e.clientY };
+      if (self.moveRaf) return;
+      self.moveRaf = requestAnimationFrame(function () {
+        self.moveRaf = null;
+        if (self.lastPointer) self._pointerMove(self.lastPointer.x, self.lastPointer.y);
+      });
+    };
+    this._onDown = function (e) {
+      if (e.pointerType !== 'mouse') self._pointerMove(e.clientX, e.clientY);
+    };
+    // A finger lifting off fires pointerleave; keep the tooltip until the user taps elsewhere.
+    this._onLeave = function (e) {
+      if (e.pointerType !== 'touch') { self.lastPointer = null; self._pointerLeave(); }
+    };
+    this._onDocDown = function (e) {
+      if (!root.contains(e.target)) self._pointerLeave();
+    };
+    this._onKey = function (e) { self._keyDown(e); };
+    this._onBlur = function () { if (self.keyboardHover) self._pointerLeave(); };
     root.addEventListener('pointermove', this._onMove);
-    root.addEventListener('pointerdown', this._onMove);
+    root.addEventListener('pointerdown', this._onDown);
     root.addEventListener('pointerleave', this._onLeave);
+    root.addEventListener('keydown', this._onKey);
+    root.addEventListener('blur', this._onBlur);
+    document.addEventListener('pointerdown', this._onDocDown);
 
     if (typeof ResizeObserver !== 'undefined') {
       this.resizeObserver = new ResizeObserver(function () {
@@ -428,10 +455,44 @@
     });
 
     this.hoverLayer = el('g', { 'class': 'cc-hover-layer' }, svg);
+    this._animateIn(seriesLayer, defs);
+    this.root.setAttribute('aria-label', o.ariaLabel || this._ariaLabel());
     if (this.hover.index >= 0) {
       if (this.hover.index >= this.times.length) this._pointerLeave();
       else this._applyHover(true);
     }
+  };
+
+  // Reveals the series from left to right on the first render only.
+  ComboChart.prototype._animateIn = function (layer, defs) {
+    var anim = this.options.animation, self = this;
+    if (this.animated || !this.times.length) return;
+    this.animated = true;
+    var reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    // Background tabs pause requestAnimationFrame, which would leave the series clipped away.
+    if (!anim || !anim.duration || reduced || document.hidden) return;
+    var id = this.id + '-reveal', pad = 20, W = this.width, H = this.height;
+    var clip = el('clipPath', { id: id }, defs);
+    var rect = el('rect', { x: -pad, y: -pad, width: 0, height: H + pad * 2 }, clip);
+    layer.setAttribute('clip-path', 'url(#' + id + ')');
+    var start = performance.now(), duration = anim.duration;
+    function frame(now) {
+      self.revealRaf = null;
+      if (!rect.isConnected) return; // re-rendered meanwhile
+      var t = Math.min(1, (now - start) / duration);
+      rect.setAttribute('width', (W + pad * 2) * (1 - Math.pow(1 - t, 3)));
+      if (t < 1) self.revealRaf = requestAnimationFrame(frame);
+      else layer.removeAttribute('clip-path');
+    }
+    this.revealRaf = requestAnimationFrame(frame);
+  };
+
+  ComboChart.prototype._ariaLabel = function () {
+    var names = this.series.map(function (s) { return s.name; }).join(', ');
+    var n = this.times.length;
+    if (!n) return 'Chart: ' + names + ', no data';
+    return 'Chart: ' + names + ', ' + n + ' dates from ' + this._dateText(this.times[0]) + ' to ' +
+      this._dateText(this.times[n - 1]) + '. Use left and right arrow keys to read values.';
   };
 
   ComboChart.prototype._draw_area = function (s, g, axis) {
@@ -501,7 +562,7 @@
       var m = s.markerSize;
       s.points.forEach(function (p) {
         if (p.value === null) return;
-        el('rect', { x: p.x - m / 2, y: p.y - m / 2, width: m, height: m, fill: s.color }, g);
+        el('rect', { x: Math.round(p.x - m / 2), y: Math.round(p.y - m / 2), width: m, height: m, fill: s.color }, g);
       });
     }
   };
@@ -513,11 +574,12 @@
 
   // ---------- interaction ----------
 
-  ComboChart.prototype._pointerMove = function (e) {
+  ComboChart.prototype._pointerMove = function (clientX, clientY) {
     if (!this.times.length || !this.scales) return;
     var rect = this.root.getBoundingClientRect();
-    var mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    var mx = clientX - rect.left, my = clientY - rect.top;
     if (mx < 0 || my < 0 || mx > this.width || my > this.height) return this._pointerLeave();
+    this.keyboardHover = false;
 
     var xs = this.scales.xs, index = 0, best = Infinity;
     for (var i = 0; i < xs.length; i++) {
@@ -543,10 +605,35 @@
       });
     }
 
-    var changed = index !== this.hover.index || hovered !== this.hover.series;
-    this.hover = { index: index, series: hovered, mx: mx, my: my };
+    this._setHover(index, hovered, mx, my);
+  };
+
+  ComboChart.prototype._setHover = function (index, series, mx, my) {
+    var changed = index !== this.hover.index || series !== this.hover.series;
+    this.hover = { index: index, series: series, mx: mx, my: my };
     if (changed) this._applyHover(false);
     if (this.options.tooltip.enabled) this._showTooltip(changed);
+  };
+
+  // Arrow keys step through dates, Home/End jump to the ends, Escape hides the tooltip.
+  ComboChart.prototype._keyDown = function (e) {
+    var n = this.times.length;
+    if (!n || !this.scales) return;
+    var index = this.hover.index, next;
+    if (e.key === 'ArrowRight') next = index < 0 ? 0 : Math.min(n - 1, index + 1);
+    else if (e.key === 'ArrowLeft') next = index < 0 ? n - 1 : Math.max(0, index - 1);
+    else if (e.key === 'Home') next = 0;
+    else if (e.key === 'End') next = n - 1;
+    else if (e.key === 'Escape') { this._pointerLeave(); return; }
+    else return;
+    e.preventDefault();
+    var sum = 0, count = 0;
+    this.series.forEach(function (s) {
+      var p = s.points[next];
+      if (p && p.value !== null) { sum += p.y; count++; }
+    });
+    this.keyboardHover = true;
+    this._setHover(next, null, this.scales.xs[next], count ? sum / count : this.height / 2);
   };
 
   ComboChart.prototype._pointerLeave = function () {
@@ -595,6 +682,11 @@
     return (s.valuePrefix || '') + v.toFixed(decimals) + (s.valueSuffix || '');
   };
 
+  ComboChart.prototype._dateText = function (time) {
+    var fmt = this.options.tooltip.dateFormat;
+    return fmt ? fmt(new Date(time)) : defaultDateFormat(new Date(time), this.options.utc, this.hasTime);
+  };
+
   ComboChart.prototype._tooltipHtml = function (index) {
     var self = this, o = this.options.tooltip, date = new Date(this.times[index]);
     var points = this.series.map(function (s) {
@@ -604,7 +696,7 @@
     if (typeof o.formatter === 'function') {
       return o.formatter({ date: date, time: this.times[index], index: index, points: points });
     }
-    var dateText = o.dateFormat ? o.dateFormat(date) : defaultDateFormat(date, this.options.utc, this.hasTime);
+    var dateText = this._dateText(this.times[index]);
     var html = '<div class="cc-tt-date">' + escapeHtml(dateText) + '</div>';
     points.forEach(function (p) {
       if (p.value === null) return;
@@ -663,10 +755,15 @@
   ComboChart.prototype.destroy = function () {
     clearTimeout(this.hideTimer);
     if (this.raf) cancelAnimationFrame(this.raf);
+    if (this.moveRaf) cancelAnimationFrame(this.moveRaf);
+    if (this.revealRaf) cancelAnimationFrame(this.revealRaf);
+    document.removeEventListener('pointerdown', this._onDocDown);
+    this.root.removeEventListener('keydown', this._onKey);
+    this.root.removeEventListener('blur', this._onBlur);
     if (this.resizeObserver) this.resizeObserver.disconnect();
     if (this._onResize) window.removeEventListener('resize', this._onResize);
     this.root.removeEventListener('pointermove', this._onMove);
-    this.root.removeEventListener('pointerdown', this._onMove);
+    this.root.removeEventListener('pointerdown', this._onDown);
     this.root.removeEventListener('pointerleave', this._onLeave);
     if (this.root.parentNode) this.root.parentNode.removeChild(this.root);
   };
