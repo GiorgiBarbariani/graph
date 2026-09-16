@@ -22,6 +22,8 @@
 
 ## Быстрый старт
 
+Подробная пошаговая инструкция по запуску — в [RUN.md](RUN.md).
+
 ```bash
 git clone https://github.com/GiorgiBarbariani/graph.git
 cd graph
