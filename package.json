@@ -1,0 +1,22 @@
+{
+  "name": "combo-chart",
+  "version": "1.0.0",
+  "description": "Dependency-free time-series combo chart: area + bar + spline + line on one plot",
+  "main": "combo-chart.js",
+  "browser": "combo-chart.js",
+  "files": [
+    "combo-chart.js"
+  ],
+  "scripts": {
+    "start": "npx --yes serve -l 8080 ."
+  },
+  "keywords": [
+    "chart",
+    "time-series",
+    "svg",
+    "area",
+    "spline",
+    "bar"
+  ],
+  "license": "MIT"
+}
